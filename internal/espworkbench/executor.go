@@ -3,7 +3,6 @@ package espworkbench
 import (
 	"bufio"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -92,7 +91,7 @@ func RunIDFCommand(projectPath string, args []string, logChannel chan LogLine) t
 			}
 		}
 
-		cmd := exec.Command("idf.py", args...)
+		cmd := Toolchain().Command("idf.py", args...)
 		cmd.Dir = projectPath
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {

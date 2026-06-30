@@ -10,20 +10,32 @@ import (
 )
 
 type ProjectContext struct {
-	Path           string
-	Name           string
-	IsValid        bool // true when CMakeLists.txt + main/ both present
-	HasCMake       bool
-	CMakePath      string
-	HasMain        bool
-	Target         string // sdkconfig CONFIG_IDF_TARGET takes precedence over CMakeLists
-	Description    string
-	HasSDKConfig   bool // sdkconfig present → project has been configured
-	HasSDKDefaults bool // sdkconfig.defaults present
+	Path string
+	Name string
+
+	// true when CMakeLists.txt + main/ both present
+	IsValid   bool
+	HasCMake  bool
+	CMakePath string
+	HasMain   bool
+
+	// sdkconfig CONFIG_IDF_TARGET takes precedence over CMakeLists
+	Target      string
+	Description string
+
+	// sdkconfig present → project has been configured
+	HasSDKConfig bool
+
+	// sdkconfig.defaults present
+	HasSDKDefaults bool
 	HasComponents  bool
 	ComponentCount int
-	PartitionTable string // filename of custom partition CSV, empty if none
-	ProjectVersion string // from project() VERSION or sdkconfig CONFIG_APP_PROJECT_VER
+
+	// filename of custom partition CSV, empty if none
+	PartitionTable string
+
+	// from project() VERSION or sdkconfig CONFIG_APP_PROJECT_VER
+	ProjectVersion string
 }
 
 func LoadProjectContext(projectPath string) ProjectContext {
@@ -77,7 +89,7 @@ func LoadProjectContext(projectPath string) ProjectContext {
 	return project
 }
 
-// ValidityLabel returns a short human-readable status string for the project.
+// Returns a short human-readable status string for the project.
 func (p ProjectContext) ValidityLabel() string {
 	if p.IsValid {
 		return "valid esp-idf project"
@@ -95,7 +107,6 @@ func (p ProjectContext) ValidityLabel() string {
 	return fmt.Sprintf("missing %s", strings.Join(missing, ", "))
 }
 
-// ── sdkconfig parsing ─────────────────────────────────────────────────────────
 
 func parseTargetFromSDKConfig(sdkconfigPath string) string {
 	file, err := os.Open(sdkconfigPath)
@@ -132,7 +143,7 @@ func parseVersionFromSDKConfig(sdkconfigPath string) string {
 	return ""
 }
 
-// normalizeTarget maps sdkconfig raw values ("esp32s3") to hyphenated form ("esp32-s3").
+// Maps sdkconfig raw values ("esp32s3") to hyphenated form ("esp32-s3").
 func normalizeTarget(raw string) string {
 	replacements := map[string]string{
 		"esp32s3": "esp32-s3",
@@ -147,7 +158,6 @@ func normalizeTarget(raw string) string {
 	return raw
 }
 
-// ── CMakeLists.txt parsing ────────────────────────────────────────────────────
 
 var versionRegex = regexp.MustCompile(`(?i)project\s*\(\s*\w+\s+VERSION\s+([\d.]+)`)
 
@@ -199,9 +209,7 @@ func parseDescriptionFromCMake(cmakePath string) string {
 	return ""
 }
 
-// ── Filesystem probes ─────────────────────────────────────────────────────────
-
-// countComponents counts subdirectories inside components/ that contain a CMakeLists.txt,
+// Counts subdirectories inside components/ that contain a CMakeLists.txt,
 // which is the standard indicator of a real ESP-IDF component.
 func countComponents(componentsPath string) int {
 	entries, err := os.ReadDir(componentsPath)
@@ -221,7 +229,7 @@ func countComponents(componentsPath string) int {
 	return count
 }
 
-// findPartitionTable looks for a CSV file in the project root that names a custom partition table.
+// Looks for a CSV file in the project root that names a custom partition table.
 func findPartitionTable(projectPath string) string {
 	entries, err := os.ReadDir(projectPath)
 	if err != nil {

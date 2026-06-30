@@ -3,7 +3,6 @@ package tui
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	// ── Palette ───────────────────────────────────────────────────────────────
 	colorAccent   = lipgloss.Color("#00D9FF") // electric cyan
 	colorPurple   = lipgloss.Color("#BD93F9") // purple for titles
 	colorSuccess  = lipgloss.Color("#50FA7B") // green for success
@@ -17,7 +16,6 @@ var (
 	colorDim      = lipgloss.Color("#3D3F55") // barely visible text
 	colorBg       = lipgloss.Color("#0A0A1A") // header background
 
-	// ── Panels ────────────────────────────────────────────────────────────────
 	panelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(colorBorder).
@@ -28,13 +26,11 @@ var (
 				BorderForeground(colorBorderHi).
 				Padding(0, 1)
 
-	// ── Header ────────────────────────────────────────────────────────────────
 	headerStyle = lipgloss.NewStyle().
 			Bold(true).
 			Background(colorBg).
 			Padding(0, 1)
 
-	// ── Typography ────────────────────────────────────────────────────────────
 	panelTitleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(colorPurple)
@@ -49,7 +45,6 @@ var (
 	mutedStyle = lipgloss.NewStyle().
 			Foreground(colorMuted)
 
-	// ── Device list ───────────────────────────────────────────────────────────
 	deviceNormalStyle = lipgloss.NewStyle().
 				Foreground(colorText)
 
@@ -65,7 +60,6 @@ var (
 			Bold(true).
 			Foreground(colorAccent)
 
-	// ── Status ────────────────────────────────────────────────────────────────
 	idleStatusStyle = lipgloss.NewStyle().
 			Foreground(colorMuted)
 
@@ -73,7 +67,6 @@ var (
 				Bold(true).
 				Foreground(colorAccent)
 
-	// ── Key bindings ──────────────────────────────────────────────────────────
 	keyBadgeStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("#0A0A1A")).
@@ -89,14 +82,12 @@ var (
 	cmdLabelDisabledStyle = lipgloss.NewStyle().
 				Foreground(colorDim)
 
-	// ── Logs ──────────────────────────────────────────────────────────────────
 	logInfoStyle    = lipgloss.NewStyle().Foreground(colorText)
 	logWarnStyle    = lipgloss.NewStyle().Foreground(colorWarn)
 	logErrorStyle   = lipgloss.NewStyle().Foreground(colorError).Bold(true)
 	logSuccessStyle = lipgloss.NewStyle().Foreground(colorSuccess).Bold(true)
 	logSystemStyle  = lipgloss.NewStyle().Foreground(colorMuted).Italic(true)
 
-	// ── Footer ────────────────────────────────────────────────────────────────
 	footerStyle = lipgloss.NewStyle().
 			Foreground(colorMuted).
 			Padding(0, 1)

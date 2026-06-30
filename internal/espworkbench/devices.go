@@ -11,7 +11,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// scanPorts returns available serial port paths for the current OS.
 func scanPorts() []string {
 	var ports []string
 	switch runtime.GOOS {
@@ -44,12 +43,12 @@ func scanPorts() []string {
 	return ports
 }
 
-// probeChip runs esptool.py to read chip info from a port (3s timeout).
+// Runs esptool.py to read chip info from a port (3s timeout).
 func probeChip(port string) (chipType string, macAddr string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "esptool.py", "--port", port, "--no-stub", "chip_id")
+	cmd := Toolchain().CommandContext(ctx, "esptool.py", "--port", port, "--no-stub", "chip_id")
 	output, err := cmd.Output()
 	if err != nil {
 		outputString := string(output)
@@ -84,7 +83,6 @@ func probeChip(port string) (chipType string, macAddr string) {
 	return
 }
 
-// ScanDevicesCmd is a tea.Cmd that scans ports and returns DevicesScannedMsg.
 func ScanDevicesCmd() tea.Cmd {
 	return func() tea.Msg {
 		ports := scanPorts()
@@ -101,7 +99,6 @@ func ScanDevicesCmd() tea.Cmd {
 	}
 }
 
-// TickCmd schedules the next auto-scan.
 func TickCmd() tea.Cmd {
 	return tea.Tick(5*time.Second, func(timestamp time.Time) tea.Msg {
 		return TickMsg{

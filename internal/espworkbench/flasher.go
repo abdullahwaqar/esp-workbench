@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -14,77 +13,131 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// BinFlashOption is a single flashable item discovered in the project build directory.
-type BinFlashOption struct {
-	Label       string   // display name shown in the picker
-	Description string   // address + size, or file count for full flash
-	IsFullFlash bool     // true = multi-file flash from flasher_args.json
-	BinPath     string   // absolute path (single-file flash only)
-	FlashAddr   string   // guessed or parsed address (single-file only)
-	BuildDir    string   // working directory for esptool.py (full flash)
-	EspArgs     []string // write_flash + all args built from flasher_args.json
-	FileCount   int      // number of files (full flash only)
+type FileBrowserEntry struct {
+	Name        string
+	IsDir       bool
+	Size        int64
+	SizeLabel   string
+	IsFullFlash bool
 }
 
-// BinFilesScannedMsg is returned by ScanBinFilesCmd.
-type BinFilesScannedMsg []BinFlashOption
+type DirLoadedMsg struct {
+	Path  string
+	Items []FileBrowserEntry
+	Err   error
+}
 
-// ScanBinFilesCmd scans <projectPath>/build/ for flashable binaries.
-func ScanBinFilesCmd(projectPath string) tea.Cmd {
+// Opens the browser at <projectPath>/build/ if it exists,
+// otherwise at projectPath itself.
+func StartBrowserCmd(projectPath string) tea.Cmd {
+	startPath := filepath.Join(projectPath, "build")
+	if _, err := os.Stat(startPath); err != nil {
+		startPath = projectPath
+	}
+	return BrowseDirCmd(startPath)
+}
+
+// Loads a directory asynchronously and returns DirLoadedMsg.
+func BrowseDirCmd(path string) tea.Cmd {
 	return func() tea.Msg {
-		return BinFilesScannedMsg(scanBinFiles(projectPath))
+		items, err := browseDir(path)
+		return DirLoadedMsg{Path: path, Items: items, Err: err}
 	}
 }
 
-func scanBinFiles(projectPath string) []BinFlashOption {
-	var options []BinFlashOption
-	buildDir := filepath.Join(projectPath, "build")
-
-	// Highest-quality option: full flash using the addresses idf.py computed.
-	flasherArgsPath := filepath.Join(buildDir, "flasher_args.json")
-	if espArgs, count, err := parseFlasherArgs(flasherArgsPath, buildDir); err == nil {
-		options = append(options, BinFlashOption{
-			Label:       "full flash",
-			Description: fmt.Sprintf("%d files  ·  flasher_args.json", count),
-			IsFullFlash: true,
-			BuildDir:    buildDir,
-			EspArgs:     espArgs,
-			FileCount:   count,
-		})
-	}
-
-	// Individual .bin files at the root of build/ (not in subdirectories).
-	entries, err := os.ReadDir(buildDir)
+func browseDir(path string) ([]FileBrowserEntry, error) {
+	entries, err := os.ReadDir(path)
 	if err != nil {
-		return options
+		return nil, err
 	}
+
+	var result []FileBrowserEntry
+
+	// ".." always first so user can navigate up; omit only at true filesystem root
+	if filepath.Dir(path) != path {
+		result = append(result, FileBrowserEntry{Name: "..", IsDir: true})
+	}
+
+	// Synthetic [full flash] entry when the ESP-IDF build manifest is present
+	if _, err := os.Stat(filepath.Join(path, "flasher_args.json")); err == nil {
+		result = append(result, FileBrowserEntry{Name: "[full flash]", IsFullFlash: true})
+	}
+
+	// Non-hidden directories first, then .bin files
+	var dirs []FileBrowserEntry
+	var bins []FileBrowserEntry
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".bin") {
+		if strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 		info, _ := entry.Info()
-		size := info.Size()
-		addr := guessFlashAddr(entry.Name(), size)
-		options = append(options, BinFlashOption{
-			Label:       entry.Name(),
-			Description: fmt.Sprintf("%s  ·  %s", addr, formatFileSize(size)),
-			BinPath:     filepath.Join(buildDir, entry.Name()),
-			FlashAddr:   addr,
-		})
+		size := int64(0)
+		if info != nil {
+			size = info.Size()
+		}
+		if entry.IsDir() {
+			dirs = append(dirs, FileBrowserEntry{Name: entry.Name(), IsDir: true})
+		} else if strings.HasSuffix(strings.ToLower(entry.Name()), ".bin") {
+			bins = append(bins, FileBrowserEntry{
+				Name:      entry.Name(),
+				Size:      size,
+				SizeLabel: formatFileSize(size),
+			})
+		}
 	}
-	return options
+	result = append(result, dirs...)
+	result = append(result, bins...)
+	return result, nil
 }
 
-// flasherArgsJSON mirrors the structure of idf.py's build/flasher_args.json.
+type BinFlashOption struct {
+	Label       string
+	IsFullFlash bool
+	BinPath     string
+	FlashAddr   string   // e.g., "0x10000"
+	EspArgs     []string // write_flash + all args (full flash only)
+	FileCount   int
+}
+
+// Infers the correct flash offset from filename and file size.
+func GuessFlashAddr(name string, size int64) string {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "bootloader"):
+		return "0x1000"
+	case strings.Contains(lower, "partition"):
+		return "0x8000"
+	// anything over 512 KB is almost certainly a merged image
+	case size > 512*1024:
+		return "0x0"
+	default:
+		return "0x10000"
+	}
+}
+
+// Parses flasher_args.json from buildDir and returns a
+// ready-to-use BinFlashOption. All file paths are made absolute.
+func BuildFullFlashOption(buildDir string) (BinFlashOption, error) {
+	argsPath := filepath.Join(buildDir, "flasher_args.json")
+	args, count, err := parseFlasherArgs(argsPath, buildDir)
+	if err != nil {
+		return BinFlashOption{}, err
+	}
+	return BinFlashOption{
+		Label:       "full flash",
+		IsFullFlash: true,
+		EspArgs:     args,
+		FileCount:   count,
+	}, nil
+}
+
 type flasherArgsJSON struct {
 	WriteFlashArgs []string          `json:"write_flash_args"`
 	FlashFiles     map[string]string `json:"flash_files"`
 }
 
-// parseFlasherArgs reads flasher_args.json and returns a complete set of
-// arguments for esptool.py write_flash, sorted by address ascending.
-// All file paths are made absolute using buildDir so esptool.py can find
-// them regardless of process working directory.
+// Reads flasher_args.json and assembles esptool.py arguments
+// with absolute paths so the caller does not need to set cmd.Dir.
 func parseFlasherArgs(path string, buildDir string) (args []string, fileCount int, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -105,33 +158,14 @@ func parseFlasherArgs(path string, buildDir string) (args []string, fileCount in
 		n, _ := strconv.ParseUint(strings.TrimPrefix(strings.ToLower(addr), "0x"), 16, 64)
 		sorted = append(sorted, addrFile{addr: addr, file: file, addrInt: n})
 	}
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].addrInt < sorted[j].addrInt
-	})
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].addrInt < sorted[j].addrInt })
 
 	args = []string{"write_flash"}
 	args = append(args, fa.WriteFlashArgs...)
 	for _, af := range sorted {
-		// absolute path — esptool.py resolves files before Python CWD applies
-		absPath := filepath.Join(buildDir, af.file)
-		args = append(args, af.addr, absPath)
+		args = append(args, af.addr, filepath.Join(buildDir, af.file))
 	}
 	return args, len(sorted), nil
-}
-
-// guessFlashAddr infers the correct flash offset from filename and size.
-func guessFlashAddr(name string, size int64) string {
-	lower := strings.ToLower(name)
-	switch {
-	case strings.Contains(lower, "bootloader"):
-		return "0x1000"
-	case strings.Contains(lower, "partition"):
-		return "0x8000"
-	case size > 512*1024: // anything over 512 KB is almost certainly a merged image
-		return "0x0"
-	default:
-		return "0x10000" // standard app partition offset
-	}
 }
 
 func formatFileSize(size int64) string {
@@ -145,8 +179,9 @@ func formatFileSize(size int64) string {
 	}
 }
 
-// RunFlashBin flashes a single binary or a full multi-file image using esptool.py.
-// It reuses the same permission-check and streaming logic as RunIDFCommand.
+// Executes esptool.py to flash a binary (or full image) to the
+// device at port. It reuses the same permission-check and log-streaming
+// infrastructure as RunIDFCommand.
 func RunFlashBin(port string, option BinFlashOption, logChannel chan LogLine) tea.Cmd {
 	return func() tea.Msg {
 		var cmdArgs []string
@@ -185,7 +220,7 @@ func RunFlashBin(port string, option BinFlashOption, logChannel chan LogLine) te
 			}
 		}
 
-		cmd := exec.Command("esptool.py", cmdArgs...)
+		cmd := Toolchain().Command("esptool.py", cmdArgs...)
 
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {

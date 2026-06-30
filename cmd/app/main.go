@@ -20,7 +20,7 @@ func main() {
 	flag.Parse()
 
 	if version {
-		fmt.Println("esp-workbench v1.0.0")
+		fmt.Println("esp-workbench v1.0.1")
 		os.Exit(0)
 	}
 

@@ -65,19 +65,42 @@ esp-workbench --version
 
 ## Keybindings
 
-| Key                    | Action                           |
-| ---------------------- | -------------------------------- |
-| `Tab` / `Shift+Tab`    | Cycle between panels             |
-| `up` / `down` or `j/k` | Navigate device list             |
-| `enter`                | Select device as active port     |
-| `b`                    | Build (`idf.py build`)           |
-| `f`                    | Flash (`idf.py -p <port> flash`) |
-| `a`                    | Build + Flash in one shot        |
-| `m`                    | Open serial monitor              |
-| `e`                    | Erase entire flash               |
-| `r`                    | Rescan devices                   |
-| `l`                    | Clear log pane                   |
-| `q` / `Ctrl+C`         | Quit                             |
+| Key                    | Action                                          |
+| ---------------------- | ----------------------------------------------- |
+| `Tab` / `Shift+Tab`    | Cycle between panels                            |
+| `up` / `down` or `j/k` | Navigate device list                            |
+| `enter`                | Select device as active port                    |
+| `b`                    | Build (`idf.py build`)                          |
+| `f`                    | Flash (`idf.py -p <port> flash`)                |
+| `a`                    | Build + Flash in one shot                       |
+| `m`                    | Open serial monitor                             |
+| `e`                    | Erase entire flash                              |
+| `x`                    | Browse and flash an existing binary             |
+| `p`                    | Read and visualize the device's partition table |
+| `r`                    | Rescan devices                                  |
+| `l`                    | Clear log pane                                  |
+| `q` / `Ctrl+C`         | Quit                                            |
+
+### Flash an existing binary (`x`)
+
+Opens a file browser starting in the project's `build/` directory (or the
+project root if no build exists yet). Navigate with `up/down`, descend into
+a directory with `enter`, go back up with `backspace`. If `flasher_args.json`
+is present in the current directory, a `[full flash]` entry appears at the
+top — selecting it flashes every component at the exact addresses idf.py
+computed, in one shot. Selecting any `.bin` file or `[full flash]` does not
+flash immediately: it opens a confirmation screen showing the file, the
+flash address, and the target device, requiring a second deliberate `enter`
+before anything is written. `esc` cancels at any point.
+
+### Visualize partitions (`p`)
+
+Reads the partition table directly off the connected device — not from your
+project files, from the chip itself — and renders it as a proportional usage
+bar plus a detail list (name, type, offset, size, percentage of flash). Also
+detects the physical flash chip size via `esptool.py flash_id` so the bar
+reflects real usage, including free space. Press `r` inside this view to
+re-read, `esc` to go back.
 
 ## Project Detection
 
@@ -90,6 +113,10 @@ esp-workbench reads the project directory at startup and displays:
 - **version** — from `project(...VERSION x.y.z)` in CMakeLists, or `CONFIG_APP_PROJECT_VER` in sdkconfig
 
 If the directory is not a valid ESP-IDF project (missing `CMakeLists.txt` or `main/`), the header shows what is missing.
+
+Note: the `partitions: *.csv` field above only names a custom partition CSV
+checked into the project — it does not read the device. For the actual,
+currently-flashed partition layout on the chip, use `p` (see Keybindings).
 
 ## Permission Handling (Linux)
 
@@ -105,6 +132,15 @@ Permanent fix (run once, then log out and back in):
 ```bash
 sudo usermod -aG dialout $USER
 ```
+
+## Development
+
+### Code Style
+
+- Descriptive variable names throughout (`model` not `m`, `stringBuilder` not `sb`)
+- Explicit package imports, no dot imports
+- Comments explain why, not what
+- Lowercase UI text throughout
 
 ### Package Boundaries
 
