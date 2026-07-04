@@ -2,6 +2,8 @@
 
 TUI for ESP32 development with ESP-IDF.
 
+![Description](docs/output.gif)
+
 ## Features
 
 - Auto-scans connected ESP32 devices on Linux, macOS, Windows
