@@ -2,6 +2,7 @@ package tui
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	idf "espworkbench/internal/espworkbench"
@@ -9,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -21,7 +23,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.height = messageTyped.Height
 		logWidth, logHeight := model.logViewDimensions()
 		model.logViewport = viewport.New(logWidth, logHeight)
-		model.logViewport.SetContent(renderLogs(model.logs))
+		model.logViewport.SetContent(renderLogs(model.logs, logWidth))
 		model.logViewport.GotoBottom()
 
 	case tea.KeyMsg:
@@ -46,7 +48,6 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if model.browserMode {
-
 			// confirmation sub-state: require a second, deliberate enter before
 			// anything actually gets written to the device
 			if model.browserConfirm != nil {
@@ -62,7 +63,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 						idf.WaitForLog(model.logChannel),
 					)
 				case "esc", "n":
-					model.browserConfirm = nil // back to the listing, nothing flashed
+					// back to the listing, nothing flashed
+					model.browserConfirm = nil
 				}
 				return model, tea.Batch(commands...)
 			}
@@ -198,7 +200,12 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		case "m":
 			if model.state == StateIdle && model.idfPort != "" {
 				model.state = StateMonitoring
-				commands = append(commands, idf.RunIDFCommand(model.project.Path, []string{"-p", model.idfPort, "monitor"}, model.logChannel))
+				model.monitorDone = make(chan struct{})
+				commands = append(commands, idf.StartMonitorCmd(
+					model.project.Path, model.idfPort, model.logChannel, model.monitorDone,
+				))
+			} else if model.state == StateMonitoring {
+				commands = append(commands, idf.StopMonitorCmd(model.monitorPty))
 			}
 
 		case "e":
@@ -274,16 +281,34 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case idf.LogMsg:
 		logLine := idf.LogLine(messageTyped)
 		model = model.appendLog(logLine)
-		model.logViewport.SetContent(renderLogs(model.logs))
+		model.logViewport.SetContent(renderLogs(model.logs, model.logViewport.Width))
 		model.logViewport.GotoBottom()
 		commands = append(commands, idf.WaitForLog(model.logChannel))
+
+	case idf.MonitorStartedMsg:
+		if messageTyped.Err != nil {
+			model.state = StateIdle
+			model = model.appendLog(idf.LogLine{Text: messageTyped.Err.Error(), Level: idf.LogLevelError})
+		} else {
+			model.monitorPty = messageTyped.Pty
+			commands = append(commands, idf.WaitForMonitorDone(model.monitorDone))
+		}
+
+	case idf.MonitorDoneMsg:
+		model.state = StateIdle
+		model.monitorPty = nil
+		model.monitorDone = nil
 
 	case idf.OperationDoneMsg:
 		model.lastErr = messageTyped.Err
 		model.state = StateIdle
 
 	case idf.TickMsg:
-		commands = append(commands, idf.ScanDevicesCmd())
+		if model.state == StateIdle {
+			commands = append(commands, idf.ScanDevicesCmd())
+		} else {
+			commands = append(commands, idf.TickCmd())
+		}
 
 	case spinner.TickMsg:
 		var command tea.Cmd
@@ -300,14 +325,10 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return model, tea.Batch(commands...)
 }
 
-// Recreates the log viewport using current dimensions and
-// reapplies existing content. Must be called any time browserMode or
-// partitionMode toggles, since commandPanelWidth depends on them and the
-// viewport otherwise only resizes on tea.WindowSizeMsg.
 func (model Model) resizeLogViewport() Model {
 	logWidth, logHeight := model.logViewDimensions()
 	model.logViewport = viewport.New(logWidth, logHeight)
-	model.logViewport.SetContent(renderLogs(model.logs))
+	model.logViewport.SetContent(renderLogs(model.logs, logWidth))
 	model.logViewport.GotoBottom()
 	return model
 }
@@ -320,24 +341,60 @@ func (model Model) appendLog(logLine idf.LogLine) Model {
 	return model
 }
 
-func renderLogs(logs []idf.LogLine) string {
+var ansiEscapeRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+func renderLogs(logs []idf.LogLine, width int) string {
 	var sb strings.Builder
 	for _, logLine := range logs {
-		switch logLine.Level {
-		case idf.LogLevelError:
-			sb.WriteString(logErrorStyle.Render(logLine.Text))
-		case idf.LogLevelWarn:
-			sb.WriteString(logWarnStyle.Render(logLine.Text))
-		case idf.LogLevelSuccess:
-			sb.WriteString(logSuccessStyle.Render(logLine.Text))
-		case idf.LogLevelSystem:
-			sb.WriteString(logSystemStyle.Render(logLine.Text))
-		default:
-			sb.WriteString(logInfoStyle.Render(logLine.Text))
+		text := sanitizeLogText(logLine.Text)
+		style := logStyleFor(logLine.Level)
+
+		for _, physicalLine := range wrapLine(text, width) {
+			sb.WriteString(style.Render(physicalLine))
+			sb.WriteString("\n")
 		}
-		sb.WriteString("\n")
 	}
 	return sb.String()
+}
+
+func logStyleFor(level idf.LogLevel) lipgloss.Style {
+	switch level {
+	case idf.LogLevelError:
+		return logErrorStyle
+	case idf.LogLevelWarn:
+		return logWarnStyle
+	case idf.LogLevelSuccess:
+		return logSuccessStyle
+	case idf.LogLevelSystem:
+		return logSystemStyle
+	default:
+		return logInfoStyle
+	}
+}
+
+func wrapLine(s string, width int) []string {
+	if width <= 0 {
+		return []string{s}
+	}
+	runes := []rune(s)
+	if len(runes) == 0 {
+		return []string{""}
+	}
+	var lines []string
+	for len(runes) > width {
+		lines = append(lines, string(runes[:width]))
+		runes = runes[width:]
+	}
+	lines = append(lines, string(runes))
+	return lines
+}
+
+func sanitizeLogText(line string) string {
+	line = strings.TrimRight(line, "\r\n")
+	if idx := strings.LastIndex(line, "\r"); idx != -1 {
+		line = line[idx+1:]
+	}
+	return ansiEscapeRegex.ReplaceAllString(line, "")
 }
 
 // Returns a wider panel width when an interactive
@@ -361,7 +418,7 @@ func (model Model) logViewDimensions() (width int, height int) {
 		logWidth = 20
 	}
 	width = logWidth - 4 - 2
-	bodyHeight := model.height - 6
+	bodyHeight := model.height - model.chromeHeight()
 	height = bodyHeight - 5
 	if height < 3 {
 		height = 3

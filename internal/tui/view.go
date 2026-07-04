@@ -22,8 +22,31 @@ func (model Model) View() string {
 	)
 }
 
+// Reports whether the terminal has room to show the ASCII logo above the
+// header without crowding the panels below it. Narrow or short terminals
+// fall back to the plain text title instead.
+func (model Model) showLogo() bool {
+	return model.width >= 60 && model.height >= 30
+}
+
+// Height reserved for header and footer chrome, used by viewBody and
+// logViewDimensions so the body panels never overlap them. Grows when
+// the ASCII logo is shown so both stay in sync automatically.
+func (model Model) chromeHeight() int {
+	base := 6 // header (2 lines) + footer (1 line) + safety margin
+	if model.showLogo() {
+		base += logoHeight + 1 // logo rows + one spacer line
+	}
+	return base
+}
+
 func (model Model) viewHeader() string {
-	title := lipgloss.NewStyle().Bold(true).Foreground(colorAccent).Render("esp workbench")
+	title := ""
+	if !model.showLogo() {
+		// the ASCII logo already spells out "esp", so the plain text
+		// title is only needed when the logo isn't shown
+		title = lipgloss.NewStyle().Bold(true).Foreground(colorAccent).Render("esp workbench")
+	}
 
 	projectName := ""
 	if model.project.Name != "" {
@@ -34,7 +57,10 @@ func (model Model) viewHeader() string {
 
 	titleWithProject := title
 	if projectName != "" {
-		titleWithProject = title + "  " + projectName
+		if titleWithProject != "" {
+			titleWithProject += "  "
+		}
+		titleWithProject += projectName
 	}
 
 	gapWidth := max(model.width-lipgloss.Width(titleWithProject)-lipgloss.Width(badge)-2, 1)
@@ -43,8 +69,15 @@ func (model Model) viewHeader() string {
 	line1 := lipgloss.JoinHorizontal(lipgloss.Top, titleWithProject, gap, badge)
 	line2 := model.viewProjectInfo()
 
+	lines := make([]string, 0, 4)
+	if model.showLogo() {
+		logo := lipgloss.NewStyle().Width(model.width).Align(lipgloss.Center).Render(renderLogo())
+		lines = append(lines, logo, "")
+	}
+	lines = append(lines, line1, line2)
+
 	return headerStyle.Width(model.width).Render(
-		lipgloss.JoinVertical(lipgloss.Left, line1, line2),
+		lipgloss.JoinVertical(lipgloss.Left, lines...),
 	)
 }
 
@@ -106,7 +139,7 @@ func (model Model) viewBody() string {
 	deviceWidth := 28
 	commandWidth := commandPanelWidth(model)
 	logWidth := max(model.width-deviceWidth-commandWidth, 20)
-	bodyHeight := max(model.height-6, 10)
+	bodyHeight := max(model.height-model.chromeHeight(), 10)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top,
 		model.viewDevicePanel(deviceWidth, bodyHeight),

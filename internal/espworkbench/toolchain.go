@@ -1,4 +1,3 @@
-// internal/espworkbench/toolchain.go
 package espworkbench
 
 import (
@@ -84,25 +83,25 @@ func shellQuote(s string) string {
 // this is just exec.Command. Otherwise it sources the detected export.sh
 // in a bash subshell first, so the right venv is present without the
 // user having to activate anything manually.
-func (t ToolchainEnv) Command(name string, args ...string) *exec.Cmd {
-	if t.ExportScript == "" {
+func (toolchain ToolchainEnv) Command(name string, args ...string) *exec.Cmd {
+	if toolchain.ExportScript == "" {
 		return exec.Command(name, args...)
 	}
-	return exec.Command("bash", "-c", t.shellLine(name, args))
+	return exec.Command("bash", "-c", toolchain.shellLine(name, args))
 }
 
-func (t ToolchainEnv) CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
-	if t.ExportScript == "" {
+func (toolchain ToolchainEnv) CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
+	if toolchain.ExportScript == "" {
 		return exec.CommandContext(ctx, name, args...)
 	}
-	return exec.CommandContext(ctx, "bash", "-c", t.shellLine(name, args))
+	return exec.CommandContext(ctx, "bash", "-c", toolchain.shellLine(name, args))
 }
 
-func (t ToolchainEnv) shellLine(name string, args []string) string {
+func (toolchain ToolchainEnv) shellLine(name string, args []string) string {
 	quotedArgs := make([]string, len(args))
 	for i, arg := range args {
 		quotedArgs[i] = shellQuote(arg)
 	}
 	return fmt.Sprintf("source %s > /dev/null 2>&1 && exec %s %s",
-		shellQuote(t.ExportScript), shellQuote(name), strings.Join(quotedArgs, " "))
+		shellQuote(toolchain.ExportScript), shellQuote(name), strings.Join(quotedArgs, " "))
 }

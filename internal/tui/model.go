@@ -2,6 +2,7 @@ package tui
 
 import (
 	idf "espworkbench/internal/espworkbench"
+	"os"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -51,6 +52,8 @@ type (
 	TickMsg           = idf.TickMsg
 	DirLoadedMsg      = idf.DirLoadedMsg
 	PartitionsReadMsg = idf.PartitionsReadMsg
+	MonitorStartedMsg = idf.MonitorStartedMsg
+	MonitorDoneMsg    = idf.MonitorDoneMsg
 )
 
 type Model struct {
@@ -81,6 +84,9 @@ type Model struct {
 	partitionMode  bool
 	partitionTable idf.PartitionTable
 	partitionErr   error
+
+	monitorPty  *os.File
+	monitorDone chan struct{}
 }
 
 func InitialModel(projectPath string) Model {

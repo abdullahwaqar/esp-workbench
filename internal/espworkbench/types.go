@@ -1,6 +1,8 @@
 package espworkbench
 
-import "time"
+import (
+	"time"
+)
 
 type Device struct {
 	Port     string

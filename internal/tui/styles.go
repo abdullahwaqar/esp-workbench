@@ -2,19 +2,40 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
+// Palette ported from opencode's built-in default theme
+// (github.com/anomalyco/opencode). Neutral scale runs darkStep1 (near-black)
+// through darkStep12 (near-white); primary/secondary/accent are opencode's
+// named theme colors, not derived from the neutral scale.
 var (
-	colorAccent   = lipgloss.Color("#00D9FF") // electric cyan
-	colorPurple   = lipgloss.Color("#BD93F9") // purple for titles
-	colorSuccess  = lipgloss.Color("#50FA7B") // green for success
-	colorError    = lipgloss.Color("#FF5555") // red for errors
-	colorWarn     = lipgloss.Color("#FFB86C") // amber for warnings
-	colorMuted    = lipgloss.Color("#6272A4") // slate for secondary text
-	colorSelected = lipgloss.Color("#44475A") // selection background
-	colorBorder   = lipgloss.Color("#3A3A5C") // dim border
-	colorBorderHi = lipgloss.Color("#00D9FF") // focused border highlight
-	colorText     = lipgloss.Color("#F8F8F2") // off-white text
-	colorDim      = lipgloss.Color("#3D3F55") // barely visible text
-	colorBg       = lipgloss.Color("#0A0A1A") // header background
+	darkStep1  = lipgloss.Color("#0a0a0a")
+	darkStep2  = lipgloss.Color("#141414")
+	darkStep3  = lipgloss.Color("#1e1e1e")
+	darkStep4  = lipgloss.Color("#282828")
+	darkStep6  = lipgloss.Color("#3c3c3c")
+	darkStep11 = lipgloss.Color("#808080")
+	darkStep12 = lipgloss.Color("#eeeeee")
+
+	opencodePrimary   = lipgloss.Color("#fab283") // warm orange — opencode's signature accent
+	opencodeSecondary = lipgloss.Color("#5c9cf5") // blue
+	opencodeAccent    = lipgloss.Color("#9d7cd8") // purple
+	opencodeRed       = lipgloss.Color("#e06c75")
+	opencodeGreen     = lipgloss.Color("#7fd88f")
+	opencodeYellow    = lipgloss.Color("#e5c07b")
+)
+
+var (
+	colorAccent   = opencodePrimary   // focus highlight, spinner
+	colorPurple   = opencodeAccent    // titles
+	colorSuccess  = opencodeGreen
+	colorError    = opencodeRed
+	colorWarn     = opencodeYellow
+	colorMuted    = darkStep11 // secondary text
+	colorSelected = darkStep4  // selection background
+	colorBorder   = darkStep4  // dim border
+	colorBorderHi = opencodePrimary // focused border highlight
+	colorText     = darkStep12 // off-white text
+	colorDim      = darkStep6  // barely visible text
+	colorInfo     = opencodeSecondary // reserved for secondary/info accents
 
 	panelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -28,7 +49,6 @@ var (
 
 	headerStyle = lipgloss.NewStyle().
 			Bold(true).
-			Background(colorBg).
 			Padding(0, 1)
 
 	panelTitleStyle = lipgloss.NewStyle().
@@ -58,7 +78,7 @@ var (
 
 	portActiveStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(colorAccent)
+			Foreground(colorInfo)
 
 	idleStatusStyle = lipgloss.NewStyle().
 			Foreground(colorMuted)
@@ -69,7 +89,7 @@ var (
 
 	keyBadgeStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#0A0A1A")).
+			Foreground(darkStep1).
 			Background(colorAccent).
 			Padding(0, 1)
 

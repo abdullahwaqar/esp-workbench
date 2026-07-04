@@ -7,9 +7,9 @@ TUI for ESP32 development with ESP-IDF.
 - Auto-scans connected ESP32 devices on Linux, macOS, Windows
 - Live streaming logs with color-coded severity (error / warn / success / system)
 - One-key operations: build, flash, build+flash, monitor, erase
+- Serial monitor streams directly into the log panel — no terminal handoff, so build/flash/monitor output all live in one continuous, scrollable history
 - Tab navigation between panels
 - Chip detection via `esptool.py` — shows chip model and MAC address
-- Auto-refresh every 5 seconds so hot-plugged devices appear
 - Project context awareness — reads CMakeLists.txt, sdkconfig, components
 - Automatic serial permission handling on Linux (dialout group check + temporary fix)
 - Single binary
@@ -19,6 +19,7 @@ TUI for ESP32 development with ESP-IDF.
 - Go 1.21+
 - ESP-IDF installed with `idf.py` in `$PATH`
 - `esptool.py` in `$PATH` (bundled with ESP-IDF)
+- Linux or macOS (the serial monitor uses a pseudo-terminal via `github.com/creack/pty`, which has no Windows implementation — build/flash/erase still work on Windows, monitor does not)
 
 ## Building
 
@@ -73,13 +74,31 @@ esp-workbench --version
 | `b`                    | Build (`idf.py build`)                          |
 | `f`                    | Flash (`idf.py -p <port> flash`)                |
 | `a`                    | Build + Flash in one shot                       |
-| `m`                    | Open serial monitor                             |
+| `m`                    | Start serial monitor; press again to stop       |
 | `e`                    | Erase entire flash                              |
 | `x`                    | Browse and flash an existing binary             |
 | `p`                    | Read and visualize the device's partition table |
 | `r`                    | Rescan devices                                  |
 | `l`                    | Clear log pane                                  |
 | `q` / `Ctrl+C`         | Quit                                            |
+
+### Serial monitor (`m`)
+
+Runs `idf.py monitor` attached to a pseudo-terminal and streams its output
+straight into the log panel, colorized the same way as every other command.
+Press `m` again to stop — this sends the same Ctrl+] byte `idf_monitor`
+listens for on a real terminal, so it exits through its own cleanup path
+(closing the serial port cleanly) rather than being killed.
+
+Because the monitor owns the serial port for as long as it's running,
+automatic device rescanning is paused while any operation (build, flash,
+monitor, erase) is active, and resumes once you're back to idle. This
+avoids intermittent chip-detection probes contending with the monitor (or
+flasher) for exclusive access to the port.
+
+Note: the monitor's own interactive shortcuts (Ctrl+T menu, etc.) aren't
+forwarded, since keyboard input isn't wired into the pty — only its output
+is captured. `m` to stop is the supported way to end a session.
 
 ### Flash an existing binary (`x`)
 
@@ -127,32 +146,13 @@ If a device is not readable, esp-workbench:
 3. Falls back to `sudo chmod a+rw <port>`
 4. If all automatic fixes fail, prints the exact command to run manually
 
+This same flow runs automatically before starting the serial monitor, not
+just build/flash/erase.
+
 Permanent fix (run once, then log out and back in):
 
 ```bash
 sudo usermod -aG dialout $USER
-```
-
-## Development
-
-### Code Style
-
-- Descriptive variable names throughout (`model` not `m`, `stringBuilder` not `sb`)
-- Explicit package imports, no dot imports
-- Comments explain why, not what
-- Lowercase UI text throughout
-
-### Package Boundaries
-
-- `espworkbench`: hardware and subprocess concerns (ports, chip detection, idf.py execution, permissions, project parsing)
-- `tui`: UI state, rendering, event handling
-
-### Format and Lint
-
-```bash
-make fmt    # go fmt
-make lint   # go vet
-make check  # fmt + lint + test
 ```
 
 ## Troubleshooting
@@ -169,6 +169,14 @@ make check  # fmt + lint + test
 go mod tidy
 go mod download
 ```
+
+**Monitor fails with "Could not exclusively lock port"**
+
+This means something else briefly held the port open while `idf_monitor`
+was starting. Auto-rescan is paused during active operations specifically
+to prevent this — if you still see it, make sure you're on a build that
+includes the idle-only rescan gate (rescanning should only ever happen
+while the app is idle, never mid-build/flash/monitor).
 
 **Terminal rendering issues**
 
