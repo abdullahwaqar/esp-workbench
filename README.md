@@ -2,7 +2,9 @@
 
 TUI for ESP32 development with ESP-IDF.
 
-![Description](docs/output.gif)
+<div align="center">
+  <img src="docs/output.gif" alt="Description">
+</div>
 
 ## Features
 
