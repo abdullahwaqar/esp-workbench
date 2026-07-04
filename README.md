@@ -2,7 +2,11 @@
 
 TUI for ESP32 development with ESP-IDF.
 
-[](https://github.com/user-attachments/assets/890a0c1f-09f4-4522-9007-36774fa99a14)
+<div align="center">
+  <video width="600" autoplay loop muted playsinline>
+    <source src="https://github.com/user-attachments/assets/890a0c1f-09f4-4522-9007-36774fa99a14" type="video/mp4">
+  </video>
+</div>
 
 ## Features
 
