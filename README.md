@@ -2,8 +2,11 @@
 
 TUI for ESP32 development with ESP-IDF.
 
-<div align="center">
-  <img src="docs/output.gif" alt="Description">
+<div style="border: 2px solid #444; background: #0d1117; padding: 15px; border-radius: 6px; overflow: hidden;">
+  <div style="color: #888; margin-bottom: 10px; font-family: monospace; font-size: 12px;">$ esp-workbench demo</div>
+  <div align="center">
+    <img src="docs/output.gif" alt="Description">
+  </div>
 </div>
 
 ## Features
