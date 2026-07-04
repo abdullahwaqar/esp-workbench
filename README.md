@@ -3,9 +3,10 @@
 TUI for ESP32 development with ESP-IDF.
 
 <div align="center">
-  <img src="docs/output.gif" alt="Description">
+  <video width="600" controls>
+    <source src="docs/demo.mp4" type="video/mp4">
+  </video>
 </div>
-
 
 ## Features
 

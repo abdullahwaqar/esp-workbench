@@ -2,10 +2,6 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
-// Palette ported from opencode's built-in default theme
-// (github.com/anomalyco/opencode). Neutral scale runs darkStep1 (near-black)
-// through darkStep12 (near-white); primary/secondary/accent are opencode's
-// named theme colors, not derived from the neutral scale.
 var (
 	darkStep1  = lipgloss.Color("#0a0a0a")
 	darkStep2  = lipgloss.Color("#141414")
@@ -15,7 +11,7 @@ var (
 	darkStep11 = lipgloss.Color("#808080")
 	darkStep12 = lipgloss.Color("#eeeeee")
 
-	opencodePrimary   = lipgloss.Color("#fab283") // warm orange — opencode's signature accent
+	opencodePrimary   = lipgloss.Color("#fab283") // warm orange
 	opencodeSecondary = lipgloss.Color("#5c9cf5") // blue
 	opencodeAccent    = lipgloss.Color("#9d7cd8") // purple
 	opencodeRed       = lipgloss.Color("#e06c75")
@@ -24,17 +20,17 @@ var (
 )
 
 var (
-	colorAccent   = opencodePrimary   // focus highlight, spinner
-	colorPurple   = opencodeAccent    // titles
+	colorAccent   = opencodePrimary // focus highlight, spinner
+	colorPurple   = opencodeAccent  // titles
 	colorSuccess  = opencodeGreen
 	colorError    = opencodeRed
 	colorWarn     = opencodeYellow
-	colorMuted    = darkStep11 // secondary text
-	colorSelected = darkStep4  // selection background
-	colorBorder   = darkStep4  // dim border
-	colorBorderHi = opencodePrimary // focused border highlight
-	colorText     = darkStep12 // off-white text
-	colorDim      = darkStep6  // barely visible text
+	colorMuted    = darkStep11        // secondary text
+	colorSelected = darkStep4         // selection background
+	colorBorder   = darkStep4         // dim border
+	colorBorderHi = opencodePrimary   // focused border highlight
+	colorText     = darkStep12        // off-white text
+	colorDim      = darkStep6         // barely visible text
 	colorInfo     = opencodeSecondary // reserved for secondary/info accents
 
 	panelStyle = lipgloss.NewStyle().
