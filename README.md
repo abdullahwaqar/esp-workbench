@@ -20,7 +20,7 @@ TUI for ESP32 development with ESP-IDF.
 
 ## Prerequisites
 
-- Go 1.21+
+- Go 1.24.2+ (to build from source)
 - ESP-IDF installed with `idf.py` in `$PATH`
 - `esptool.py` in `$PATH` (bundled with ESP-IDF)
 - Linux or macOS (the serial monitor uses a pseudo-terminal via `github.com/creack/pty`, which has no Windows implementation — build/flash/erase still work on Windows, monitor does not)
@@ -70,21 +70,44 @@ esp-workbench --version
 
 ## Keybindings
 
-| Key                    | Action                                          |
-| ---------------------- | ----------------------------------------------- |
-| `Tab` / `Shift+Tab`    | Cycle between panels                            |
-| `up` / `down` or `j/k` | Navigate device list                            |
-| `enter`                | Select device as active port                    |
-| `b`                    | Build (`idf.py build`)                          |
-| `f`                    | Flash (`idf.py -p <port> flash`)                |
-| `a`                    | Build + Flash in one shot                       |
-| `m`                    | Start serial monitor; press again to stop       |
-| `e`                    | Erase entire flash                              |
-| `x`                    | Browse and flash an existing binary             |
-| `p`                    | Read and visualize the device's partition table |
-| `r`                    | Rescan devices                                  |
-| `l`                    | Clear log pane                                  |
-| `q` / `Ctrl+C`         | Quit                                            |
+| Key                    | Action                                                             |
+| ---------------------- | ------------------------------------------------------------------ |
+| `Tab` / `Shift+Tab`    | Move focus between the device list and the log                     |
+| `up` / `down` or `j/k` | Choose a device, or scroll the log when it has focus               |
+| `PgUp` / `PgDn`        | Page through the log                                               |
+| `Home` / `End`         | Jump to the oldest output / back to following new output           |
+| `enter`                | Use the highlighted device                                         |
+| `b`                    | Build (`idf.py build`)                                             |
+| `f`                    | Flash (`idf.py -p <port> flash`)                                   |
+| `a`                    | Build + Flash in one shot                                          |
+| `m`                    | Start serial monitor; press again to stop                          |
+| `e`                    | Erase entire flash (asks first, `enter` to erase, `esc` to cancel) |
+| `x`                    | Browse and flash an existing binary                                |
+| `p`                    | Read and visualize the device's partition table                    |
+| `r`                    | Rescan devices                                                     |
+| `l`                    | Clear log pane                                                     |
+| `q`                    | Quit (while an operation runs, press `q` twice)                    |
+| `Ctrl+C`               | Quit immediately                                                   |
+
+When a key can't run (no device selected, another operation running), the
+footer says why and what to do instead.
+
+The log follows new output while it's scrolled to the bottom. Scroll up to
+read and it stays put, with a "↓ N more" cue in its title; press `End` to
+follow again.
+
+### Devices
+
+If exactly one board is connected it's selected automatically. With several,
+nothing is selected until you pick one, because `f` flashes without asking.
+If the active board is unplugged it's dropped from the target, so flash and
+erase can never point at a port that's gone.
+
+### Terminal size
+
+The layout needs at least 80×16. In a smaller window esp-workbench shows a
+resize message and ignores every key except `q`. Colors adapt to light and
+dark terminal backgrounds.
 
 ### Serial monitor (`m`)
 
@@ -111,7 +134,14 @@ project root if no build exists yet). Navigate with `up/down`, descend into
 a directory with `enter`, go back up with `backspace`. If `flasher_args.json`
 is present in the current directory, a `[full flash]` entry appears at the
 top — selecting it flashes every component at the exact addresses idf.py
-computed, in one shot. Selecting any `.bin` file or `[full flash]` does not
+computed, in one shot.
+
+For a single `.bin`, the address is inferred: a merged image (it carries a
+partition table at 0x8000) goes to `0x0`; `bootloader*.bin` goes to the
+bootloader offset for your project's target (`0x1000` on ESP32/ESP32-S2,
+`0x2000` on ESP32-P4/C5, `0x0` on the rest); `partition*.bin` to `0x8000`;
+`ota_data*.bin` to `0xd000`; anything else to `0x10000`. Always check the
+address on the confirmation screen. Selecting any `.bin` file or `[full flash]` does not
 flash immediately: it opens a confirmation screen showing the file, the
 flash address, and the target device, requiring a second deliberate `enter`
 before anything is written. `esc` cancels at any point.
@@ -187,3 +217,18 @@ while the app is idle, never mid-build/flash/monitor).
 - Ensure the terminal supports ANSI colors
 - Try resizing the window (layout reflows on resize)
 - On Windows, use Windows Terminal rather than cmd.exe
+
+## Recording the demo
+
+`docs/demo.gif` is recorded with [VHS](https://github.com/charmbracelet/vhs)
+against a simulated toolchain, so no board is needed. `demo/sim/bin` holds
+fake `idf.py` and `esptool.py` scripts that print realistic build, flash,
+monitor and partition output, and `demo/sim/setup.sh` creates a sample
+project plus two fake serial ports (`/dev/ttyUSB0`, `/dev/ttyACM0`).
+
+```bash
+# needs vhs, ttyd, ffmpeg and (optionally) gifsicle; Linux only
+make demo
+```
+
+Edit `demo/demo.tape` to change the script, timing or theme.

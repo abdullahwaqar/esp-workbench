@@ -1,4 +1,4 @@
-.PHONY: build run clean install help lint fmt test
+.PHONY: build run clean install help lint fmt test demo
 
 BINARY_NAME=esp-workbench
 BINARY_PATH=./bin/$(BINARY_NAME)
@@ -82,3 +82,10 @@ dev:
 ## check: Run format, lint, and test without building
 check: fmt lint test
 	@echo "all checks passed"
+
+## demo: Record docs/demo.gif with VHS against simulated boards (Linux, needs sudo)
+demo: build
+	@sudo demo/sim/setup.sh
+	@vhs demo/demo.tape
+	@command -v gifsicle >/dev/null && gifsicle -O3 --lossy=20 -b docs/demo.gif || true
+	@echo "recorded docs/demo.gif"

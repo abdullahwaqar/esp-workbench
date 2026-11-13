@@ -2,6 +2,7 @@ package espworkbench
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -49,11 +50,13 @@ func probeChip(port string) (chipType string, macAddr string) {
 	defer cancel()
 
 	cmd := Toolchain().CommandContext(ctx, "esptool.py", "--port", port, "--no-stub", "chip_id")
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		outputString := string(output)
 
 		switch {
+		case errors.Is(ctx.Err(), context.DeadlineExceeded):
+			return "[TIMEOUT]", ""
 		case strings.Contains(outputString, "Permission denied"):
 			return "[NO ACCESS]", ""
 		case strings.Contains(outputString, "could not open port"):

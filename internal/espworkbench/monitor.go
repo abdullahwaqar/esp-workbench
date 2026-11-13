@@ -1,7 +1,6 @@
 package espworkbench
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 
@@ -42,13 +41,8 @@ func StartMonitorCmd(projectPath, port string, logChannel chan LogLine, done cha
 
 		go func() {
 			defer close(done)
-			scanner := bufio.NewScanner(ptmx)
-			scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-			for scanner.Scan() {
-				line := scanner.Text()
-				logChannel <- LogLine{Text: line, Level: classifyLog(line)}
-			}
-			cmd.Wait()
+			streamOutput(ptmx, logChannel)
+			_ = cmd.Wait()
 			ptmx.Close()
 			logChannel <- LogLine{Text: "monitor stopped", Level: LogLevelSystem}
 		}()

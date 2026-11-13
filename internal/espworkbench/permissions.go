@@ -34,7 +34,10 @@ func CheckSerialAccess(port string) error {
 		return nil
 	}
 
-	currentUser, _ := user.Current()
+	username := "unknown"
+	if currentUser, userErr := user.Current(); userErr == nil && currentUser != nil {
+		username = currentUser.Username
+	}
 
 	groupOutput, _ := exec.Command("id", "-nG").Output()
 	groups := strings.Fields(string(groupOutput))
@@ -47,7 +50,7 @@ func CheckSerialAccess(port string) error {
 		Port:        port,
 		IsReadable:  false,
 		InDialout:   inDialoutGroup,
-		CurrentUser: currentUser.Username,
+		CurrentUser: username,
 		DevicePerms: string(permOutput),
 	}
 
@@ -58,7 +61,7 @@ func CheckSerialAccess(port string) error {
 		"──────────────────────────────────────────────────────────────",
 		"",
 		fmt.Sprintf("device  : %s", port),
-		fmt.Sprintf("user    : %s", currentUser.Username),
+		fmt.Sprintf("user    : %s", username),
 		fmt.Sprintf("status  : cannot read %s", port),
 		"",
 	}
@@ -68,7 +71,7 @@ func CheckSerialAccess(port string) error {
 			"fix: add user to dialout group",
 			"",
 			"run once:",
-			fmt.Sprintf("  $ sudo usermod -aG dialout %s", currentUser.Username),
+			fmt.Sprintf("  $ sudo usermod -aG dialout %s", username),
 			"",
 			"then log out and log back in (or reboot).",
 			"",

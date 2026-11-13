@@ -1,7 +1,6 @@
 package espworkbench
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -99,19 +98,61 @@ type BinFlashOption struct {
 	FileCount   int
 }
 
-// Infers the correct flash offset from filename and file size.
-func GuessFlashAddr(name string, size int64) string {
+// Infers the flash offset for a single .bin file.
+//
+// A merged image (idf.py merge-bin, esptool merge_bin) always goes to 0x0 and
+// is recognised by the partition table magic it carries at 0x8000, not by its
+// size: a normal application image is often larger than 512 KB, and writing
+// one at 0x0 would overwrite the bootloader and partition table.
+//
+// The bootloader offset depends on the chip family, so target is the project's
+// IDF target ("esp32", "esp32-s3", "esp32s3", ...). Pass "" when unknown.
+func GuessFlashAddr(path string, name string, target string) string {
+	if isMergedImage(path) {
+		return "0x0"
+	}
 	lower := strings.ToLower(name)
 	switch {
 	case strings.Contains(lower, "bootloader"):
-		return "0x1000"
+		return bootloaderOffset(target)
 	case strings.Contains(lower, "partition"):
 		return "0x8000"
-	// anything over 512 KB is almost certainly a merged image
-	case size > 512*1024:
-		return "0x0"
+	case strings.Contains(lower, "ota_data"):
+		// otadata offset in ESP-IDF's two-OTA partition layouts
+		return "0xd000"
 	default:
 		return "0x10000"
+	}
+}
+
+// Reports whether the file at path contains a partition table at 0x8000,
+// which only a merged full-flash image does.
+func isMergedImage(path string) bool {
+	if path == "" {
+		return false
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	magic := make([]byte, 2)
+	if _, err := file.ReadAt(magic, partitionTableOffset); err != nil {
+		return false
+	}
+	return magic[0] == partitionMagicLow && magic[1] == partitionMagicHigh
+}
+
+// Second-stage bootloader offset per chip family.
+func bootloaderOffset(target string) string {
+	switch strings.ReplaceAll(strings.ToLower(target), "-", "") {
+	case "esp32", "esp32s2", "":
+		return "0x1000"
+	case "esp32p4", "esp32c5":
+		return "0x2000"
+	default:
+		// esp32-s3, esp32-c2, esp32-c3, esp32-c6, esp32-c61, esp32-h2, ...
+		return "0x0"
 	}
 }
 
@@ -204,60 +245,11 @@ func RunFlashBin(port string, option BinFlashOption, logChannel chan LogLine) te
 			}
 		}
 
-		if err := CheckSerialAccess(port); err != nil {
-			logChannel <- LogLine{Text: err.Error(), Level: LogLevelError}
-			logChannel <- LogLine{Text: "", Level: LogLevelSystem}
-			logChannel <- LogLine{Text: "attempting automatic permission fix...", Level: LogLevelSystem}
-			if fixErr := AttemptTemporaryFix(port); fixErr == nil {
-				logChannel <- LogLine{Text: "permissions fixed. retrying...", Level: LogLevelSuccess}
-				if reCheckErr := CheckSerialAccess(port); reCheckErr != nil {
-					logChannel <- LogLine{Text: reCheckErr.Error(), Level: LogLevelError}
-					return OperationDoneMsg{Err: reCheckErr}
-				}
-			} else {
-				logChannel <- LogLine{Text: "automatic fix failed. run the command shown above manually.", Level: LogLevelWarn}
-				return OperationDoneMsg{Err: err}
-			}
+		if err := ensureSerialAccess(port, logChannel); err != nil {
+			return OperationDoneMsg{Err: err}
 		}
 
 		cmd := Toolchain().Command("esptool.py", cmdArgs...)
-
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			logChannel <- LogLine{Text: "stdout pipe error: " + err.Error(), Level: LogLevelError}
-			return OperationDoneMsg{Err: err}
-		}
-		stderr, err := cmd.StderrPipe()
-		if err != nil {
-			logChannel <- LogLine{Text: "stderr pipe error: " + err.Error(), Level: LogLevelError}
-			return OperationDoneMsg{Err: err}
-		}
-
-		if err := cmd.Start(); err != nil {
-			logChannel <- LogLine{Text: "failed to start esptool.py: " + err.Error(), Level: LogLevelError}
-			return OperationDoneMsg{Err: err}
-		}
-
-		done := make(chan struct{}, 2)
-		streamPipe := func(reader interface{ Read([]byte) (int, error) }) {
-			defer func() { done <- struct{}{} }()
-			scanner := bufio.NewScanner(reader)
-			for scanner.Scan() {
-				line := scanner.Text()
-				logChannel <- LogLine{Text: line, Level: classifyLog(line)}
-			}
-		}
-		go streamPipe(stdout)
-		go streamPipe(stderr)
-		<-done
-		<-done
-
-		err = cmd.Wait()
-		if err != nil {
-			logChannel <- LogLine{Text: fmt.Sprintf("exited with error: %v", err), Level: LogLevelError}
-		} else {
-			logChannel <- LogLine{Text: "flash complete", Level: LogLevelSuccess}
-		}
-		return OperationDoneMsg{Err: err}
+		return runStreaming(cmd, "esptool.py", "flash complete", logChannel)
 	}
 }

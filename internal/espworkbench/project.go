@@ -107,7 +107,6 @@ func (p ProjectContext) ValidityLabel() string {
 	return fmt.Sprintf("missing %s", strings.Join(missing, ", "))
 }
 
-
 func parseTargetFromSDKConfig(sdkconfigPath string) string {
 	file, err := os.Open(sdkconfigPath)
 	if err != nil {
@@ -143,21 +142,17 @@ func parseVersionFromSDKConfig(sdkconfigPath string) string {
 	return ""
 }
 
-// Maps sdkconfig raw values ("esp32s3") to hyphenated form ("esp32-s3").
+var compactTarget = regexp.MustCompile(`^esp32([a-z]\d+)$`)
+
+// Maps sdkconfig raw values ("esp32s3", "esp32c61") to hyphenated form
+// ("esp32-s3", "esp32-c61"). Already-hyphenated and plain "esp32" pass through.
 func normalizeTarget(raw string) string {
-	replacements := map[string]string{
-		"esp32s3": "esp32-s3",
-		"esp32c3": "esp32-c3",
-		"esp32c6": "esp32-c6",
-		"esp32h2": "esp32-h2",
-		"esp32p4": "esp32-p4",
-	}
-	if normalized, ok := replacements[raw]; ok {
-		return normalized
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if m := compactTarget.FindStringSubmatch(raw); m != nil {
+		return "esp32-" + m[1]
 	}
 	return raw
 }
-
 
 var versionRegex = regexp.MustCompile(`(?i)project\s*\(\s*\w+\s+VERSION\s+([\d.]+)`)
 
@@ -172,22 +167,17 @@ func parseVersionFromCMake(cmakePath string) string {
 	return ""
 }
 
+var cmakeTargetRegex = regexp.MustCompile(`(?i)set\s*\(\s*IDF_TARGET\s+"?(esp32[a-z0-9-]*)"?`)
+
+// Looks for an explicit set(IDF_TARGET ...) call, the authoritative way to
+// pin the target in CMakeLists before project(). Defaults to esp32.
 func parseTargetFromCMake(cmakePath string) string {
 	content, err := os.ReadFile(cmakePath)
 	if err != nil {
 		return "esp32"
 	}
-	// look for explicit set(IDF_TARGET ...) calls, which are the authoritative way
-	// to declare target in CMakeLists before project()
-	for _, line := range strings.Split(string(content), "\n") {
-		line = strings.ToLower(strings.TrimSpace(line))
-		if strings.Contains(line, "set(idf_target") || strings.Contains(line, "set(idf_target,") {
-			for _, chip := range []string{"esp32-s3", "esp32-c3", "esp32-c6", "esp32-h2", "esp32-p4", "esp32s3", "esp32c3", "esp32c6", "esp32h2", "esp32p4"} {
-				if strings.Contains(line, chip) {
-					return normalizeTarget(chip)
-				}
-			}
-		}
+	if m := cmakeTargetRegex.FindSubmatch(content); m != nil {
+		return normalizeTarget(string(m[1]))
 	}
 	return "esp32"
 }
@@ -240,7 +230,8 @@ func findPartitionTable(projectPath string) string {
 			continue
 		}
 		name := entry.Name()
-		if strings.HasSuffix(name, ".csv") && strings.Contains(strings.ToLower(name), "partition") {
+		lower := strings.ToLower(name)
+		if strings.HasSuffix(lower, ".csv") && strings.Contains(lower, "partition") {
 			return name
 		}
 	}

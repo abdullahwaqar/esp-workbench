@@ -1,16 +1,15 @@
 package tui
 
 import (
+	"fmt"
 	"path/filepath"
-	"regexp"
+	"slices"
 	"strings"
 
 	idf "espworkbench/internal/espworkbench"
 
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -21,247 +20,17 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		model.width = messageTyped.Width
 		model.height = messageTyped.Height
-		logWidth, logHeight := model.logViewDimensions()
-		model.logViewport = viewport.New(logWidth, logHeight)
-		model.logViewport.SetContent(renderLogs(model.logs, logWidth))
-		model.logViewport.GotoBottom()
 
 	case tea.KeyMsg:
-		if messageTyped.String() == "ctrl+c" {
-			return model, tea.Quit
-		}
-
-		if model.partitionMode {
-			switch messageTyped.String() {
-			case "esc", "q":
-				model.partitionMode = false
-				model = model.resizeLogViewport()
-			case "r":
-				if model.idfPort != "" {
-					model.partitionMode = false
-					model.state = StateReadingPartitions
-					model = model.resizeLogViewport()
-					commands = append(commands, idf.ReadPartitionTableCmd(model.idfPort))
-				}
-			}
-			return model, tea.Batch(commands...)
-		}
-
-		if model.browserMode {
-			// confirmation sub-state: require a second, deliberate enter before
-			// anything actually gets written to the device
-			if model.browserConfirm != nil {
-				switch messageTyped.String() {
-				case "enter", "y":
-					opt := *model.browserConfirm
-					model.state = StateFlashing
-					model.browserMode = false
-					model.browserConfirm = nil
-					model = model.resizeLogViewport()
-					commands = append(commands,
-						idf.RunFlashBin(model.idfPort, opt, model.logChannel),
-						idf.WaitForLog(model.logChannel),
-					)
-				case "esc", "n":
-					// back to the listing, nothing flashed
-					model.browserConfirm = nil
-				}
-				return model, tea.Batch(commands...)
-			}
-
-			switch messageTyped.String() {
-
-			case "esc", "q":
-				model.browserMode = false
-				model.browserItems = nil
-				model.browserCursor = 0
-				model.browserConfirm = nil
-				model = model.resizeLogViewport()
-
-			case "up", "k":
-				if model.browserCursor > 0 {
-					model.browserCursor--
-				}
-
-			case "down", "j":
-				if model.browserCursor < len(model.browserItems)-1 {
-					model.browserCursor++
-				}
-
-			// backspace or left arrow: go up one directory
-			case "backspace", "left", "h":
-				parent := filepath.Dir(model.browserPath)
-				if parent != model.browserPath {
-					commands = append(commands, idf.BrowseDirCmd(parent))
-				}
-
-			case "enter", "right", "l":
-				if len(model.browserItems) == 0 {
-					break
-				}
-				item := model.browserItems[model.browserCursor]
-
-				switch {
-				case item.Name == "..":
-					parent := filepath.Dir(model.browserPath)
-					if parent != model.browserPath {
-						commands = append(commands, idf.BrowseDirCmd(parent))
-					}
-
-				case item.IsDir:
-					commands = append(commands, idf.BrowseDirCmd(
-						filepath.Join(model.browserPath, item.Name),
-					))
-
-				case item.IsFullFlash:
-					if model.idfPort == "" {
-						model = model.appendLog(idf.LogLine{Text: "select a device first", Level: idf.LogLevelWarn})
-						break
-					}
-					opt, err := idf.BuildFullFlashOption(model.browserPath)
-					if err != nil {
-						model = model.appendLog(idf.LogLine{
-							Text:  "failed to read flasher_args.json: " + err.Error(),
-							Level: idf.LogLevelError,
-						})
-						break
-					}
-					// stage for confirmation — does not flash yet
-					model.browserConfirm = &opt
-
-				default:
-					// .bin file
-					if model.idfPort == "" {
-						model = model.appendLog(idf.LogLine{Text: "select a device first", Level: idf.LogLevelWarn})
-						break
-					}
-					absPath := filepath.Join(model.browserPath, item.Name)
-					opt := idf.BinFlashOption{
-						Label:     item.Name,
-						BinPath:   absPath,
-						FlashAddr: idf.GuessFlashAddr(item.Name, item.Size),
-					}
-					// stage for confirmation — does not flash yet
-					model.browserConfirm = &opt
-				}
-			}
-			return model, tea.Batch(commands...)
-		}
-
-		switch messageTyped.String() {
-
-		case "q":
-			return model, tea.Quit
-
-		case "tab":
-			model.focusedPanel = (model.focusedPanel + 1) % 3
-
-		case "shift+tab":
-			model.focusedPanel = (model.focusedPanel + 2) % 3
-
-		case "up", "k":
-			if model.focusedPanel == PanelDevices && model.selectedDev > 0 {
-				model.selectedDev--
-			}
-
-		case "down", "j":
-			if model.focusedPanel == PanelDevices && model.selectedDev < len(model.devices)-1 {
-				model.selectedDev++
-			}
-
-		case "enter":
-			if model.focusedPanel == PanelDevices && len(model.devices) > 0 {
-				device := model.devices[model.selectedDev]
-				model.idfPort = device.Port
-				model = model.appendLog(idf.LogLine{
-					Text:  "→ selected " + device.Port + "  [" + device.ChipType + "]",
-					Level: idf.LogLevelSystem,
-				})
-			}
-
-		case "b":
-			if model.state == StateIdle {
-				model.state = StateBuilding
-				commands = append(commands, idf.RunIDFCommand(model.project.Path, []string{"build"}, model.logChannel))
-			}
-
-		case "f":
-			if model.state == StateIdle && model.idfPort != "" {
-				model.state = StateFlashing
-				commands = append(commands, idf.RunIDFCommand(model.project.Path, []string{"-p", model.idfPort, "flash"}, model.logChannel))
-			}
-
-		case "a":
-			if model.state == StateIdle && model.idfPort != "" {
-				model.state = StateFlashing
-				commands = append(commands, idf.RunIDFCommand(model.project.Path, []string{"-p", model.idfPort, "build", "flash"}, model.logChannel))
-			}
-
-		case "m":
-			if model.state == StateIdle && model.idfPort != "" {
-				model.state = StateMonitoring
-				model.monitorDone = make(chan struct{})
-				commands = append(commands, idf.StartMonitorCmd(
-					model.project.Path, model.idfPort, model.logChannel, model.monitorDone,
-				))
-			} else if model.state == StateMonitoring {
-				commands = append(commands, idf.StopMonitorCmd(model.monitorPty))
-			}
-
-		case "e":
-			if model.state == StateIdle && model.idfPort != "" {
-				model.state = StateErasing
-				commands = append(commands, idf.RunIDFCommand(model.project.Path, []string{"-p", model.idfPort, "erase-flash"}, model.logChannel))
-			}
-
-		case "x":
-			if model.state == StateIdle {
-				commands = append(commands, idf.StartBrowserCmd(model.project.Path))
-			}
-
-		case "p":
-			if model.state == StateIdle {
-				if model.idfPort == "" {
-					model = model.appendLog(idf.LogLine{Text: "select a device first", Level: idf.LogLevelWarn})
-				} else {
-					model.state = StateReadingPartitions
-					commands = append(commands, idf.ReadPartitionTableCmd(model.idfPort))
-				}
-			}
-
-		case "r":
-			model = model.appendLog(idf.LogLine{Text: "→ scanning devices...", Level: idf.LogLevelSystem})
-			commands = append(commands, idf.ScanDevicesCmd())
-
-		case "l":
-			model.logs = model.logs[:0]
-			model.logViewport.SetContent("")
-		}
+		var command tea.Cmd
+		model, command = model.handleKey(messageTyped)
+		commands = append(commands, command)
 
 	case idf.DevicesScannedMsg:
-		model.devices = []idf.Device(messageTyped)
-		if model.selectedDev >= len(model.devices) {
-			model.selectedDev = max(0, len(model.devices)-1)
-		}
-		if model.idfPort == "" && len(model.devices) > 0 {
-			model.idfPort = model.devices[0].Port
-		}
-		commands = append(commands, idf.TickCmd())
+		model = model.applyScan([]idf.Device(messageTyped))
 
 	case idf.DirLoadedMsg:
-		if messageTyped.Err != nil {
-			model = model.appendLog(idf.LogLine{
-				Text:  "cannot read directory: " + messageTyped.Err.Error(),
-				Level: idf.LogLevelError,
-			})
-		} else {
-			model.browserPath = messageTyped.Path
-			model.browserItems = messageTyped.Items
-			model.browserCursor = 0
-			model.browserMode = true
-			model.browserConfirm = nil
-			model = model.resizeLogViewport()
-		}
+		model = model.applyDirLoaded(messageTyped)
 
 	case idf.PartitionsReadMsg:
 		model.state = StateIdle
@@ -275,19 +44,16 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.partitionTable = messageTyped.Table
 			model.partitionErr = nil
 			model.partitionMode = true
-			model = model.resizeLogViewport()
 		}
 
 	case idf.LogMsg:
-		logLine := idf.LogLine(messageTyped)
-		model = model.appendLog(logLine)
-		model.logViewport.SetContent(renderLogs(model.logs, model.logViewport.Width))
-		model.logViewport.GotoBottom()
+		model = model.appendLog(idf.LogLine(messageTyped))
 		commands = append(commands, idf.WaitForLog(model.logChannel))
 
 	case idf.MonitorStartedMsg:
 		if messageTyped.Err != nil {
 			model.state = StateIdle
+			model.monitorDone = nil
 			model = model.appendLog(idf.LogLine{Text: messageTyped.Err.Error(), Level: idf.LogLevelError})
 		} else {
 			model.monitorPty = messageTyped.Pty
@@ -304,124 +70,446 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.state = StateIdle
 
 	case idf.TickMsg:
-		if model.state == StateIdle {
+		// exactly one tick loop runs for the life of the program; it only
+		// scans while idle so probes never contend with build/flash/monitor
+		// for the serial port
+		commands = append(commands, idf.TickCmd())
+		if !model.isBusy() && !model.scanning {
+			model.scanning = true
 			commands = append(commands, idf.ScanDevicesCmd())
-		} else {
-			commands = append(commands, idf.TickCmd())
 		}
 
 	case spinner.TickMsg:
-		var command tea.Cmd
-		model.spinner, command = model.spinner.Update(messageTyped)
-		commands = append(commands, command)
+		// let the spinner loop die while idle; startOperation restarts it
+		if model.isBusy() {
+			var command tea.Cmd
+			model.spinner, command = model.spinner.Update(messageTyped)
+			commands = append(commands, command)
+		}
 	}
 
-	if model.focusedPanel == PanelLogs {
-		var command tea.Cmd
-		model.logViewport, command = model.logViewport.Update(message)
-		commands = append(commands, command)
+	if !model.isBusy() {
+		model.quitArmed = false
 	}
-
+	model = model.syncLogViewport()
 	return model, tea.Batch(commands...)
 }
 
-func (model Model) resizeLogViewport() Model {
-	logWidth, logHeight := model.logViewDimensions()
-	model.logViewport = viewport.New(logWidth, logHeight)
-	model.logViewport.SetContent(renderLogs(model.logs, logWidth))
-	model.logViewport.GotoBottom()
-	return model
-}
-
-func (model Model) appendLog(logLine idf.LogLine) Model {
-	model.logs = append(model.logs, logLine)
-	if len(model.logs) > 500 {
-		model.logs = model.logs[len(model.logs)-500:]
+func (model Model) handleKey(keyMsg tea.KeyMsg) (Model, tea.Cmd) {
+	keyName := keyMsg.String()
+	if keyName == "ctrl+c" {
+		return model, tea.Quit
 	}
-	return model
+
+	model.notice = nil
+	if keyName != "q" {
+		model.quitArmed = false
+	}
+
+	switch {
+	case model.tooSmall():
+		if keyName == "q" {
+			return model.requestQuit()
+		}
+		return model, nil
+	case model.eraseConfirm:
+		return model.handleEraseConfirmKey(keyName)
+	case model.partitionMode:
+		return model.handlePartitionKey(keyName)
+	case model.browserConfirm != nil:
+		return model.handleFlashConfirmKey(keyName)
+	case model.browserMode:
+		return model.handleBrowserKey(keyName)
+	}
+	return model.handleMainKey(keyMsg)
 }
 
-var ansiEscapeRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+func (model Model) handleMainKey(keyMsg tea.KeyMsg) (Model, tea.Cmd) {
+	switch keyMsg.String() {
 
-func renderLogs(logs []idf.LogLine, width int) string {
-	var sb strings.Builder
-	for _, logLine := range logs {
-		text := sanitizeLogText(logLine.Text)
-		style := logStyleFor(logLine.Level)
+	case "q":
+		return model.requestQuit()
 
-		for _, physicalLine := range wrapLine(text, width) {
-			sb.WriteString(style.Render(physicalLine))
-			sb.WriteString("\n")
+	case "tab", "shift+tab":
+		if model.focusedPanel == PanelLogs {
+			model.focusedPanel = PanelDevices
+		} else {
+			model.focusedPanel = PanelLogs
+		}
+
+	case "up", "k":
+		if model.focusedPanel == PanelDevices && model.selectedDev > 0 {
+			model.selectedDev--
+		}
+
+	case "down", "j":
+		if model.focusedPanel == PanelDevices && model.selectedDev < len(model.devices)-1 {
+			model.selectedDev++
+		}
+
+	case "home", "g":
+		if model.focusedPanel == PanelLogs {
+			model.logViewport.GotoTop()
+		}
+
+	case "end", "G":
+		if model.focusedPanel == PanelLogs {
+			model.logViewport.GotoBottom()
+		}
+
+	case "enter":
+		if model.focusedPanel == PanelDevices && len(model.devices) > 0 {
+			device := model.devices[model.selectedDev]
+			model.idfPort = device.Port
+			model = model.appendLog(idf.LogLine{
+				Text:  "→ selected " + device.Port + "  [" + device.ChipType + "]",
+				Level: idf.LogLevelSystem,
+			})
+		}
+
+	case "b":
+		if model, ok := model.requireIdle("build"); !ok {
+			return model, nil
+		}
+		if !model.project.IsValid {
+			return model.withNotice(idf.LogLevelWarn,
+				"can't build: "+model.project.ValidityLabel()+". start esp-workbench in an esp-idf project folder"), nil
+		}
+		return model.startOperation(StateBuilding,
+			idf.RunIDFCommand(model.project.Path, []string{"build"}, model.logChannel))
+
+	case "f":
+		if model, ok := model.requireIdleWithPort("flash"); !ok {
+			return model, nil
+		}
+		return model.startOperation(StateFlashing,
+			idf.RunIDFCommand(model.project.Path, []string{"-p", model.idfPort, "flash"}, model.logChannel))
+
+	case "a":
+		if model, ok := model.requireIdleWithPort("build and flash"); !ok {
+			return model, nil
+		}
+		return model.startOperation(StateFlashing,
+			idf.RunIDFCommand(model.project.Path, []string{"-p", model.idfPort, "build", "flash"}, model.logChannel))
+
+	case "m":
+		if model.state == StateMonitoring {
+			if model.monitorPty == nil {
+				return model.withNotice(idf.LogLevelSystem, "monitor is still starting. press m again in a moment to stop it"), nil
+			}
+			return model, idf.StopMonitorCmd(model.monitorPty)
+		}
+		if model, ok := model.requireIdleWithPort("monitor"); !ok {
+			return model, nil
+		}
+		model.monitorDone = make(chan struct{})
+		return model.startOperation(StateMonitoring,
+			idf.StartMonitorCmd(model.project.Path, model.idfPort, model.logChannel, model.monitorDone))
+
+	case "e":
+		if model, ok := model.requireIdleWithPort("erase"); !ok {
+			return model, nil
+		}
+		// erasing wipes the whole chip and cannot be undone, so it gets the
+		// same deliberate second step as flashing a binary
+		model.eraseConfirm = true
+
+	case "x":
+		if model, ok := model.requireIdle("browse binaries"); !ok {
+			return model, nil
+		}
+		model.browserReturnTo = ""
+		return model, idf.StartBrowserCmd(model.project.Path)
+
+	case "p":
+		if model, ok := model.requireIdleWithPort("read partitions"); !ok {
+			return model, nil
+		}
+		return model.startOperation(StateReadingPartitions, idf.ReadPartitionTableCmd(model.idfPort))
+
+	case "r":
+		if model, ok := model.requireIdle("rescan"); !ok {
+			return model, nil
+		}
+		if model.scanning {
+			return model.withNotice(idf.LogLevelSystem, "already scanning for devices"), nil
+		}
+		model.scanning = true
+		model = model.appendLog(idf.LogLine{Text: "→ scanning devices...", Level: idf.LogLevelSystem})
+		return model, idf.ScanDevicesCmd()
+
+	case "l":
+		model.logs = nil
+		model.logViewport.SetContent("")
+		model.logViewport.GotoTop()
+
+	default:
+		if model.focusedPanel == PanelLogs {
+			var command tea.Cmd
+			model.logViewport, command = model.logViewport.Update(keyMsg)
+			return model, command
 		}
 	}
-	return sb.String()
+
+	// up/down/pgup/pgdn scroll the log when it has focus
+	if model.focusedPanel == PanelLogs {
+		switch keyMsg.String() {
+		case "up", "k", "down", "j":
+			var command tea.Cmd
+			model.logViewport, command = model.logViewport.Update(keyMsg)
+			return model, command
+		}
+	}
+	return model, nil
 }
 
-func logStyleFor(level idf.LogLevel) lipgloss.Style {
-	switch level {
-	case idf.LogLevelError:
-		return logErrorStyle
-	case idf.LogLevelWarn:
-		return logWarnStyle
-	case idf.LogLevelSuccess:
-		return logSuccessStyle
-	case idf.LogLevelSystem:
-		return logSystemStyle
-	default:
-		return logInfoStyle
+func (model Model) handleEraseConfirmKey(keyName string) (Model, tea.Cmd) {
+	switch keyName {
+	case "enter", "y":
+		model.eraseConfirm = false
+		if model, ok := model.requireIdleWithPort("erase"); !ok {
+			return model, nil
+		}
+		return model.startOperation(StateErasing,
+			idf.RunIDFCommand(model.project.Path, []string{"-p", model.idfPort, "erase-flash"}, model.logChannel))
+	case "esc", "n", "q":
+		model.eraseConfirm = false
+		return model.withNotice(idf.LogLevelSystem, "erase cancelled. nothing was changed"), nil
 	}
+	return model, nil
 }
 
-func wrapLine(s string, width int) []string {
-	if width <= 0 {
-		return []string{s}
+func (model Model) handlePartitionKey(keyName string) (Model, tea.Cmd) {
+	switch keyName {
+	case "esc", "q":
+		model.partitionMode = false
+	case "r":
+		if model.idfPort == "" {
+			return model.withNotice(idf.LogLevelWarn, "no device selected. press esc, then choose a device"), nil
+		}
+		model.partitionMode = false
+		return model.startOperation(StateReadingPartitions, idf.ReadPartitionTableCmd(model.idfPort))
 	}
-	runes := []rune(s)
-	if len(runes) == 0 {
-		return []string{""}
-	}
-	var lines []string
-	for len(runes) > width {
-		lines = append(lines, string(runes[:width]))
-		runes = runes[width:]
-	}
-	lines = append(lines, string(runes))
-	return lines
+	return model, nil
 }
 
-func sanitizeLogText(line string) string {
-	line = strings.TrimRight(line, "\r\n")
-	if idx := strings.LastIndex(line, "\r"); idx != -1 {
-		line = line[idx+1:]
+// Confirmation sub-state: a second, deliberate enter is required before
+// anything gets written to the device.
+func (model Model) handleFlashConfirmKey(keyName string) (Model, tea.Cmd) {
+	switch keyName {
+	case "enter", "y":
+		opt := *model.browserConfirm
+		model.browserConfirm = nil
+		if model, ok := model.requireIdleWithPort("flash"); !ok {
+			return model, nil
+		}
+		model.browserMode = false
+		// the single long-lived WaitForLog loop already drains logChannel;
+		// adding a second reader here would reorder log lines
+		return model.startOperation(StateFlashing, idf.RunFlashBin(model.idfPort, opt, model.logChannel))
+	case "esc", "n":
+		model.browserConfirm = nil
 	}
-	return ansiEscapeRegex.ReplaceAllString(line, "")
+	return model, nil
 }
 
-// Returns a wider panel width when an interactive
-// visualization (browser, confirm, or partitions) needs the extra room.
-// Used by both viewBody and logViewDimensions so layout never drifts apart.
-func commandPanelWidth(model Model) int {
-	if model.browserMode || model.partitionMode {
-		return 52
+func (model Model) handleBrowserKey(keyName string) (Model, tea.Cmd) {
+	switch keyName {
+
+	case "esc", "q":
+		model.browserMode = false
+		model.browserItems = nil
+		model.browserCursor = 0
+		model.browserConfirm = nil
+
+	case "up", "k":
+		if model.browserCursor > 0 {
+			model.browserCursor--
+		}
+
+	case "down", "j":
+		if model.browserCursor < len(model.browserItems)-1 {
+			model.browserCursor++
+		}
+
+	case "home", "g":
+		model.browserCursor = 0
+
+	case "end", "G":
+		model.browserCursor = max(len(model.browserItems)-1, 0)
+
+	case "backspace", "left", "h":
+		return model.browseUp()
+
+	case "enter", "right", "l":
+		if len(model.browserItems) == 0 {
+			return model, nil
+		}
+		item := model.browserItems[model.browserCursor]
+
+		switch {
+		case item.Name == "..":
+			return model.browseUp()
+
+		case item.IsDir:
+			model.browserReturnTo = ""
+			return model, idf.BrowseDirCmd(filepath.Join(model.browserPath, item.Name))
+
+		case item.IsFullFlash:
+			if model.idfPort == "" {
+				return model.withNotice(idf.LogLevelWarn, noDeviceText("flash")), nil
+			}
+			opt, err := idf.BuildFullFlashOption(model.browserPath)
+			if err != nil {
+				model = model.appendLog(idf.LogLine{
+					Text:  "can't read flasher_args.json: " + err.Error() + ". rebuild the project with b, then try again",
+					Level: idf.LogLevelError,
+				})
+				return model.withNotice(idf.LogLevelError, "can't read flasher_args.json. rebuild with b, then try again"), nil
+			}
+			model.browserConfirm = &opt
+
+		default:
+			if model.idfPort == "" {
+				return model.withNotice(idf.LogLevelWarn, noDeviceText("flash")), nil
+			}
+			absPath := filepath.Join(model.browserPath, item.Name)
+			model.browserConfirm = &idf.BinFlashOption{
+				Label:     item.Name,
+				BinPath:   absPath,
+				FlashAddr: idf.GuessFlashAddr(absPath, item.Name, model.project.Target),
+			}
+		}
 	}
-	return 34
+	return model, nil
 }
 
-func (model Model) logViewDimensions() (width int, height int) {
-	if model.width == 0 {
-		return 60, 20
+func (model Model) browseUp() (Model, tea.Cmd) {
+	parent := filepath.Dir(model.browserPath)
+	if parent == model.browserPath {
+		return model, nil
 	}
-	deviceWidth := 28
-	commandWidth := commandPanelWidth(model)
-	logWidth := model.width - deviceWidth - commandWidth
-	if logWidth < 20 {
-		logWidth = 20
+	model.browserReturnTo = filepath.Base(model.browserPath)
+	return model, idf.BrowseDirCmd(parent)
+}
+
+func (model Model) applyDirLoaded(msg idf.DirLoadedMsg) Model {
+	// an operation may have started between pressing x and the directory
+	// arriving; opening the browser now would allow a second, concurrent
+	// write to the device
+	if model.isBusy() {
+		return model
 	}
-	width = logWidth - 4 - 2
-	bodyHeight := model.height - model.chromeHeight()
-	height = bodyHeight - 5
-	if height < 3 {
-		height = 3
+	if msg.Err != nil {
+		return model.appendLog(idf.LogLine{
+			Text:  "can't open " + msg.Path + ": " + msg.Err.Error(),
+			Level: idf.LogLevelError,
+		})
 	}
-	return
+	model.browserPath = msg.Path
+	model.browserItems = msg.Items
+	model.browserCursor = 0
+	if model.browserReturnTo != "" {
+		if idx := slices.IndexFunc(msg.Items, func(e idf.FileBrowserEntry) bool {
+			return e.IsDir && e.Name == model.browserReturnTo
+		}); idx >= 0 {
+			model.browserCursor = idx
+		}
+		model.browserReturnTo = ""
+	}
+	model.browserMode = true
+	model.browserConfirm = nil
+	return model
+}
+
+func (model Model) applyScan(devices []idf.Device) Model {
+	model.scanning = false
+	model.devices = devices
+
+	if model.selectedDev >= len(model.devices) {
+		model.selectedDev = max(0, len(model.devices)-1)
+	}
+
+	// the active port was unplugged: forget it rather than pointing flash
+	// and erase at a device that is gone
+	if model.idfPort != "" && !slices.ContainsFunc(devices, func(d idf.Device) bool { return d.Port == model.idfPort }) {
+		model = model.appendLog(idf.LogLine{
+			Text:  "device " + model.idfPort + " disconnected",
+			Level: idf.LogLevelWarn,
+		})
+		model.idfPort = ""
+	}
+
+	// pick a device automatically only when there is no choice to make;
+	// with several boards attached the user chooses, since f flashes
+	// without a confirmation step
+	if model.idfPort == "" && len(model.devices) == 1 {
+		model.idfPort = model.devices[0].Port
+		model.selectedDev = 0
+		model = model.appendLog(idf.LogLine{
+			Text:  "→ using " + model.idfPort + "  [" + model.devices[0].ChipType + "]",
+			Level: idf.LogLevelSystem,
+		})
+	}
+	return model
+}
+
+// Moves into a busy state and (re)starts the spinner.
+func (model Model) startOperation(state AppState, command tea.Cmd) (Model, tea.Cmd) {
+	model.state = state
+	model.lastErr = nil
+	return model, tea.Batch(command, model.spinner.Tick)
+}
+
+func (model Model) requestQuit() (Model, tea.Cmd) {
+	if !model.isBusy() || model.quitArmed {
+		return model, tea.Quit
+	}
+	model.quitArmed = true
+	return model.withNotice(idf.LogLevelWarn,
+		fmt.Sprintf("%s is still running. press q again to quit anyway, or any other key to stay", model.state)), nil
+}
+
+// Returns ok=false, with a footer notice explaining why, when an operation
+// is already running.
+func (model Model) requireIdle(action string) (Model, bool) {
+	if !model.isBusy() {
+		return model, true
+	}
+	text := fmt.Sprintf("can't %s while %s. wait for it to finish", action, model.state)
+	if model.state == StateMonitoring {
+		text = fmt.Sprintf("can't %s while monitoring. press m to stop the monitor first", action)
+	}
+	return model.withNotice(idf.LogLevelWarn, text), false
+}
+
+func (model Model) requireIdleWithPort(action string) (Model, bool) {
+	model, ok := model.requireIdle(action)
+	if !ok {
+		return model, false
+	}
+	if model.idfPort == "" {
+		return model.withNotice(idf.LogLevelWarn, noDeviceText(action)), false
+	}
+	return model, true
+}
+
+func noDeviceText(action string) string {
+	return "can't " + action + ": no device selected. plug in a board and press r, or pick one in devices with enter"
+}
+
+func (model Model) withNotice(level idf.LogLevel, text string) Model {
+	model.notice = &idf.LogLine{Text: text, Level: level}
+	return model
+}
+
+// First line of an error, for places that only have room for a summary.
+func firstLine(err error) string {
+	for _, line := range strings.Split(err.Error(), "\n") {
+		line = strings.Trim(line, " ─")
+		if line != "" {
+			return line
+		}
+	}
+	return "unknown error"
 }
